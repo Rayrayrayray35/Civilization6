@@ -4,7 +4,10 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Civitypes.h"
+#include "CiviTypes.h"
+#include "BuildingDataAsset.h"
+#include "WonderDataAsset.h"
+#include "Wonder.h"
 #include "HexMapRenderer.generated.h"
 
 class UTerrainDataAsset;
@@ -55,6 +58,14 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Map Renderer")
     void UpdateTile(ULandblock* Landblock);
 
+    // 新增：建筑数据资产
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Map Renderer")
+    UBuildingDataAsset* BuildingDataAsset;
+
+    // 新增：奇观数据资产
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Map Renderer")
+    UWonderDataAsset* WonderDataAsset;
+
 protected:
     virtual void BeginPlay() override;
 
@@ -84,6 +95,20 @@ private:
     // 获取或创建实例化网格组件
     UHierarchicalInstancedStaticMeshComponent* GetOrCreateTerrainMeshComponent(ETerrain TerrainType);
     UHierarchicalInstancedStaticMeshComponent* GetOrCreateLandformMeshComponent(ELandform LandformType);
+
+    // 新增：建筑实例化组件映射
+    UPROPERTY()
+    TMap<EBuildingType, UHierarchicalInstancedStaticMeshComponent*> BuildingMeshComponents;
+
+    // 新增：获取或创建建筑组件
+    UHierarchicalInstancedStaticMeshComponent* GetOrCreateBuildingMeshComponent(EBuildingType BuildingType);
+
+    // 新增：存储生成的奇观 Actor 引用，以便清除地图时销毁
+    UPROPERTY()
+    TArray<AWonder*> SpawnedWonderActors;
+
+    // 辅助函数：生成奇观
+    void SpawnWonder(ULandblock* Block, const FVector& Position);
 };
 
 

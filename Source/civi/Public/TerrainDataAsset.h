@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
-#include "Civitypes.h"
+#include "CiviTypes.h"
 #include "TerrainDataAsset.generated.h"
 
 // 单个地形的显示配置

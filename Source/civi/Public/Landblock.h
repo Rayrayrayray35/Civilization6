@@ -5,8 +5,10 @@
 #include "CoreMinimal.h"
 #include "UObject/NoExportTypes.h"
 #include "Civi_GameModeBase.h"
-#include "Civitypes.h"
+#include "CiviTypes.h"
 #include "Landblock.generated.h"
+
+class UBuilding;
 
 UCLASS(BlueprintType)
 class CIVI_API ULandblock : public UObject
@@ -60,4 +62,20 @@ public:
     // 获取移动消耗
     UFUNCTION(BlueprintCallable, Category = "Landblock")
     int32 GetMovementCost() const;
+
+    // 当前地块上的建筑
+    UPROPERTY(BlueprintReadOnly, Category = "Development")
+    UBuilding* Building;
+
+    // 辅助函数：建造建筑
+    UFUNCTION(BlueprintCallable, Category = "Development")
+    void ConstructBuilding(EBuildingType NewBuildingType);
+
+    // 该地块的奇观类型
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Development")
+    EWonderType WonderType;
+
+    // 辅助：设置奇观
+    UFUNCTION(BlueprintCallable, Category = "Development")
+    void SetWonder(EWonderType NewWonderType);
 };

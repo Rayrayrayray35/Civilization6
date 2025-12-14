@@ -4,6 +4,10 @@
 #include "Landblock.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
+#include "Building.h"
+#include "BuildingDataAsset.h"
+#include "WonderDataAsset.h"
+#include "Wonder.h"
 
 AHexMapRenderer::AHexMapRenderer()
 {
@@ -44,6 +48,12 @@ void AHexMapRenderer::RenderMap(const TArray<ULandblock*>& MapGrid, int32 MapWid
     {
         UE_LOG(LogTemp, Error, TEXT("HexMapRenderer: TerrainDataAsset is not set!"));
         return;
+    }
+
+    // 检查建筑资源是否配置
+    if (!BuildingDataAsset)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("BuildingDataAsset is not set!"));
     }
 
     // 清除之前的渲染
@@ -92,6 +102,35 @@ void AHexMapRenderer::RenderMap(const TArray<ULandblock*>& MapGrid, int32 MapWid
                         FTransform Transform(Rotation, LandformPos, LandformData.MeshScale);
                         LandformComp->AddInstance(Transform);
                     }
+                }
+
+                // --- 新增：建筑渲染逻辑 ---
+                if (Block->Building && Block->Building->Type != EBuildingType::None && BuildingDataAsset)
+                {
+                    UHierarchicalInstancedStaticMeshComponent* BuildingComp = GetOrCreateBuildingMeshComponent(Block->Building->Type);
+
+                    if (BuildingComp)
+                    {
+                        FBuildingDisplayData BData = BuildingDataAsset->GetBuildingDisplayData(Block->Building->Type);
+
+                        FRotator Rotation = FRotator::ZeroRotator;
+                        if (BData.bRandomRotation)
+                        {
+                            Rotation.Yaw = FMath::RandRange(0.0f, 360.0f);
+                        }
+
+                        // 建筑通常叠加在地貌之上，或者有独立的高度偏移
+                        FVector BuildingPos = Position + FVector(0, 0, BData.HeightOffset);
+                        FTransform Transform(Rotation, BuildingPos, BData.MeshScale);
+
+                        BuildingComp->AddInstance(Transform);
+                    }
+                }
+
+                // 检查是否有奇观
+                if (Block && Block->WonderType != EWonderType::None)
+                {
+                    SpawnWonder(Block, Position);
                 }
             }
         }
@@ -144,6 +183,27 @@ void AHexMapRenderer::ClearMap()
         }
     }
     LandformMeshComponents.Empty();
+
+    // 新增：清除建筑实例
+    for (auto& Pair : BuildingMeshComponents)
+    {
+        if (Pair.Value)
+        {
+            Pair.Value->ClearInstances();
+            Pair.Value->DestroyComponent();
+        }
+    }
+    BuildingMeshComponents.Empty();
+
+    // 新增：清除奇观 Actor
+    for (AWonder* Wonder : SpawnedWonderActors)
+    {
+        if (Wonder && IsValid(Wonder))
+        {
+            Wonder->Destroy();
+        }
+    }
+    SpawnedWonderActors.Empty();
 
     // 清除生成的Actor
     for (AActor* Actor : SpawnedTileActors)
@@ -263,3 +323,66 @@ UHierarchicalInstancedStaticMeshComponent* AHexMapRenderer::GetOrCreateLandformM
     return NewComp;
 }
 
+UHierarchicalInstancedStaticMeshComponent* AHexMapRenderer::GetOrCreateBuildingMeshComponent(EBuildingType BuildingType)
+{
+    if (!BuildingDataAsset) return nullptr;
+
+    FBuildingDisplayData BData = BuildingDataAsset->GetBuildingDisplayData(BuildingType);
+    if (!BData.Mesh) return nullptr;
+
+    // 检查缓存
+    if (UHierarchicalInstancedStaticMeshComponent** Found = BuildingMeshComponents.Find(BuildingType))
+    {
+        return *Found;
+    }
+
+    // 创建组件
+    FName ComponentName = FName(*FString::Printf(TEXT("BuildingMesh_%d"), (int32)BuildingType));
+    UHierarchicalInstancedStaticMeshComponent* NewComp = NewObject<UHierarchicalInstancedStaticMeshComponent>(this, ComponentName);
+
+    NewComp->SetStaticMesh(BData.Mesh);
+    NewComp->SetupAttachment(RootComponent);
+    NewComp->RegisterComponent();
+
+    // 设置剔除距离（建筑比地形小，可以更早剔除）
+    NewComp->SetCullDistances(5000, 20000);
+
+    BuildingMeshComponents.Add(BuildingType, NewComp);
+    return NewComp;
+}
+
+void AHexMapRenderer::SpawnWonder(ULandblock* Block, const FVector& Position)
+{
+    if (!WonderDataAsset || !Block) return;
+
+    FWonderDisplayData Data = WonderDataAsset->GetWonderDisplayData(Block->WonderType);
+
+    // 确定生成的类：优先使用配置的子类，否则使用默认 AWonder
+    UClass* SpawnClass = Data.ActorClass ? Data.ActorClass.Get() : AWonder::StaticClass();
+
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.Owner = this;
+    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+    // 计算位置（加上高度偏移）
+    FVector SpawnPos = Position + FVector(0, 0, Data.HeightOffset);
+    FRotator SpawnRot = FRotator::ZeroRotator; // 奇观通常有固定朝向，或者在 Data 中配置朝向
+
+    AWonder* NewWonder = GetWorld()->SpawnActor<AWonder>(SpawnClass, SpawnPos, SpawnRot, SpawnParams);
+
+    if (NewWonder)
+    {
+        NewWonder->WonderType = Block->WonderType;
+        NewWonder->GridX = Block->X;
+        NewWonder->GridY = Block->Y;
+
+        // 如果没有指定特殊的 BP 子类，我们需要手动设置模型
+        if (!Data.ActorClass && Data.Mesh)
+        {
+            NewWonder->InitVisuals(Data.Mesh, Data.MeshScale);
+        }
+        // 如果是 BP 子类，通常 visuals 已经在 BP 中配置好了，或者也可以在这里调用 InitVisuals
+
+        SpawnedWonderActors.Add(NewWonder);
+    }
+}

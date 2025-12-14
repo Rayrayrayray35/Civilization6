@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "CiviTypes.generated.h"
 
 // 地形类型枚举
 UENUM(BlueprintType)
@@ -41,4 +42,27 @@ enum class EHexDirection : uint8
     SouthWest = 3   UMETA(DisplayName = "西南"),
     West = 4        UMETA(DisplayName = "西"),
     NorthWest = 5   UMETA(DisplayName = "西北")
+};
+
+// 建筑类型枚举
+UENUM(BlueprintType)
+enum class EBuildingType : uint8
+{
+    None        UMETA(DisplayName = "无"),
+    Farm        UMETA(DisplayName = "农场"),
+    Mine        UMETA(DisplayName = "矿山"),
+    Camp        UMETA(DisplayName = "营地"),
+    LumberMill  UMETA(DisplayName = "伐木场"),
+    Pasture     UMETA(DisplayName = "牧场")
+};
+
+// 奇观类型枚举
+UENUM(BlueprintType)
+enum class EWonderType : uint8
+{
+    None            UMETA(DisplayName = "无"),
+    Pyramids        UMETA(DisplayName = "金字塔"),
+    GreatLighthouse UMETA(DisplayName = "大灯塔"),
+    Colossus        UMETA(DisplayName = "巨像"),
+    Oracle          UMETA(DisplayName = "神谕")
 };

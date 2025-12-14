@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
-#include "Civitypes.h"
+#include "CiviTypes.h"
 #include "Civi_GameModeBase.generated.h"
 
 /**

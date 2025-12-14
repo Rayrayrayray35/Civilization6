@@ -1,7 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-
 #include "Landblock.h"
+#include "Building.h"
 
 ULandblock::ULandblock()
 {
@@ -9,6 +9,7 @@ ULandblock::ULandblock()
     Y = 0;
     Terrain = ETerrain::Plain;
     Landform = ELandform::None;
+    Building = nullptr;
 }
 
 void ULandblock::InitNeighbors()
@@ -110,4 +111,23 @@ int32 ULandblock::GetMovementCost() const
     }
 
     return BaseCost;
+}
+
+void ULandblock::ConstructBuilding(EBuildingType NewBuildingType)
+{
+    if (NewBuildingType == EBuildingType::None)
+    {
+        Building = nullptr;
+        return;
+    }
+
+    // 创建新的建筑逻辑对象
+    Building = NewObject<UBuilding>(this);
+    Building->Type = NewBuildingType;
+}
+
+void ULandblock::SetWonder(EWonderType NewWonderType)
+{
+    WonderType = NewWonderType;
+    // 这里可以添加逻辑：如果奇观是排他的，检查全局唯一性等
 }
