@@ -9,6 +9,10 @@
 #include "Landblock.generated.h"
 
 class UBuilding;
+class UTerraindataasset;
+class ACity;
+class AUnit;
+class UBuildingDataAsset;
 
 UCLASS(BlueprintType)
 class CIVI_API ULandblock : public UObject
@@ -78,4 +82,39 @@ public:
     // 辅助：设置奇观
     UFUNCTION(BlueprintCallable, Category = "Development")
     void SetWonder(EWonderType NewWonderType);
+
+    // 获取该地块的总产出（地形 + 地貌 + 建筑）
+    // 需要传入 DataAsset 来获取基础配置数据
+    // 传入 BuildingData 以计算建筑加成和维护费
+    UFUNCTION(BlueprintCallable, Category = "Economy")
+    FYields GetTotalYield(const UTerraindataasset* TData, const UBuildingDataAsset* BData) const;
+
+    // --- 视野系统 ---
+
+    // 存储每个玩家对该地块的视野状态 (Key: PlayerIndex, Value: State)
+    UPROPERTY(BlueprintReadOnly, Category = "FogOfWar")
+    TMap<int32, EVisibilityState> PlayerVisibility;
+
+    // 获取指定玩家的视野状态
+    UFUNCTION(BlueprintCallable, Category = "FogOfWar")
+    EVisibilityState GetVisibility(int32 PlayerIndex) const;
+
+    // 设置指定玩家的视野状态
+    UFUNCTION(BlueprintCallable, Category = "FogOfWar")
+    void SetVisibility(int32 PlayerIndex, EVisibilityState NewState);
+
+    // 该地块所属的城市 (如果为空则表示无主之地)
+    UPROPERTY(BlueprintReadOnly, Category = "City")
+    ACity* OwningCity = nullptr;
+
+    // 辅助函数：设置所有者
+    void SetOwningCity(ACity* NewCity) { OwningCity = NewCity; }
+
+    // 当前地块上的战斗单位（假设每个格子只能有一个战斗单位）
+    UPROPERTY(BlueprintReadOnly, Category = "Unit")
+    AUnit* OccupyingUnit = nullptr;
+
+    // 辅助：是否有单位
+    bool HasUnit() const { return OccupyingUnit != nullptr; }
+
 };

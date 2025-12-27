@@ -44,6 +44,9 @@ FVector AHexMapRenderer::CalculateHexWorldPosition(int32 X, int32 Y) const
 
 void AHexMapRenderer::RenderMap(const TArray<ULandblock*>& MapGrid, int32 MapWidth, int32 MapHeight)
 {
+    TileRenderInstances.Empty();
+    TileRenderInstances.SetNum(MapWidth * MapHeight);
+
     if (!TerrainDataAsset)
     {
         UE_LOG(LogTemp, Error, TEXT("HexMapRenderer: TerrainDataAsset is not set!"));
@@ -81,8 +84,16 @@ void AHexMapRenderer::RenderMap(const TArray<ULandblock*>& MapGrid, int32 MapWid
                 if (TerrainComp)
                 {
                     FTransform Transform(FRotator::ZeroRotator, Position, FVector(1.0f));
-                    TerrainComp->AddInstance(Transform);
+                    int32 InstIdx = TerrainComp->AddInstance(Transform);
+
+                    // 记录索引
+                    if (Index < TileRenderInstances.Num())
+                    {
+                        TileRenderInstances[Index] = { TerrainComp, InstIdx };
+                    }
                 }
+
+
 
                 // 添加地貌实例（如果有）
                 if (Block->Landform != ELandform::None)
@@ -277,6 +288,7 @@ UHierarchicalInstancedStaticMeshComponent* AHexMapRenderer::GetOrCreateTerrainMe
     }
 
     NewComp->SetupAttachment(RootComponent);
+    NewComp->NumCustomDataFloats = 1; // 开启自定义数据通道
     NewComp->RegisterComponent();
 
     // 优化设置
@@ -384,5 +396,43 @@ void AHexMapRenderer::SpawnWonder(ULandblock* Block, const FVector& Position)
         // 如果是 BP 子类，通常 visuals 已经在 BP 中配置好了，或者也可以在这里调用 InitVisuals
 
         SpawnedWonderActors.Add(NewWonder);
+    }
+}
+
+void AHexMapRenderer::UpdateFogOfWarVisuals(const TArray<ULandblock*>& MapGrid, int32 CurrentPlayerIndex)
+{
+    if (TileRenderInstances.Num() != MapGrid.Num()) return;
+
+    for (int32 i = 0; i < MapGrid.Num(); i++)
+    {
+        ULandblock* Block = MapGrid[i];
+        if (!Block) continue;
+
+        FHexRenderInstance& RenderInfo = TileRenderInstances[i];
+        if (!RenderInfo.Component) continue;
+
+        EVisibilityState State = Block->GetVisibility(CurrentPlayerIndex);
+
+        // 我们使用 CustomData[0] 来传递视野状态给材质
+        // 0.0 = Unexplored (隐藏或黑色)
+        // 0.5 = FogOfWar (变暗)
+        // 1.0 = Visible (正常)
+
+        float VisualValue = 0.0f;
+        switch (State)
+        {
+            case EVisibilityState::Unexplored: VisualValue = 0.0f; break;
+            case EVisibilityState::FogOfWar:   VisualValue = 0.5f; break;
+            case EVisibilityState::Visible:    VisualValue = 1.0f; break;
+        }
+
+        // 更新实例数据 (需要确保组件开启了 NumCustomDataFloats >= 1)
+        RenderInfo.Component->SetCustomDataValue(RenderInfo.InstanceIndex, 0, VisualValue, true);
+    }
+
+    // 标记渲染状态脏，触发更新
+    for (auto& Pair : TerrainMeshComponents)
+    {
+        if (Pair.Value) Pair.Value->MarkRenderStateDirty();
     }
 }

@@ -31,6 +31,18 @@ struct FBuildingDisplayData
     // 某些建筑（如农田）可能需要随机旋转，而某些（如矿山）可能固定朝向
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     bool bRandomRotation = false;
+
+    // 建造所需的生产力
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GameLogic")
+    int32 ProductionCost = 60;
+
+    // 维护费
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GameLogic")
+    int32 MaintenanceCost = 1;
+
+    // 建筑提供的产出 (例如：粮仓 +2 粮食)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GameLogic")
+    FYields BonusYields;
 };
 
 UCLASS(BlueprintType)

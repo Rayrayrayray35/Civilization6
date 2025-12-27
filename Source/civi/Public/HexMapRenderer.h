@@ -66,6 +66,11 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Map Renderer")
     UWonderDataAsset* WonderDataAsset;
 
+    // 更新地图的迷雾显示
+    // CurrentPlayerIndex: 当前操作的玩家，只显示他的视野
+    UFUNCTION(BlueprintCallable, Category = "Map Renderer")
+    void UpdateFogOfWarVisuals(const TArray<ULandblock*>& MapGrid, int32 CurrentPlayerIndex);
+
 protected:
     virtual void BeginPlay() override;
 
@@ -109,6 +114,15 @@ private:
 
     // 辅助函数：生成奇观
     void SpawnWonder(ULandblock* Block, const FVector& Position);
+
+    struct FHexRenderInstance
+    {
+        UHierarchicalInstancedStaticMeshComponent* Component; // 属于哪个组件
+        int32 InstanceIndex; // 在组件中的索引
+    };
+
+    // 映射表：MapIndex (Y*Width+X) -> 渲染实例信息
+    TArray<FHexRenderInstance> TileRenderInstances;
 };
 
 

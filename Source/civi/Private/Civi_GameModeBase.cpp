@@ -3,6 +3,11 @@
 
 #include "Civi_GameModeBase.h"
 #include "Landblock.h"
+#include "EngineUtils.h"
+#include "City.h"
+#include "Unit.h"
+#include "HexMapRenderer.h"
+#include "Kismet/GameplayStatics.h"
 
 ACivi_GameModeBase::ACivi_GameModeBase()
 {
@@ -14,8 +19,182 @@ void ACivi_GameModeBase::BeginPlay()
 {
     Super::BeginPlay();
 
-    // 游戏开始时初始化地图
+    // 初始化资源数组
+    PlayerGlobalYields.SetNumZeroed(TotalPlayers);
+    // 给予初始资金 (例如 100 金币)
+    for (int32 i = 0; i < TotalPlayers; i++)
+    {
+        PlayerGlobalYields[i].Gold = 100;
+    }
+
+    // 初始化研发状态
+    InitResearch();
+
+    // 1. 初始化地图
     InitMap();
+
+    // 2. 尝试找到场景中的渲染器并绘制地图 (如果场景里放了 BP_HexMapRenderer)
+    for (TActorIterator<AHexMapRenderer> It(GetWorld()); It; ++It)
+    {
+        AHexMapRenderer* Renderer = *It;
+        if (Renderer)
+        {
+            // 确保渲染器有数据引用
+            Renderer->RenderMap(MapGrid, MapWidth, MapHeight);
+            break;
+        }
+    }
+
+    // 3. 启动游戏第一回合
+    CurrentTurn = 1;
+    CurrentPlayerIndex = 0;
+    StartTurn();
+}
+
+void ACivi_GameModeBase::EndTurn()
+{
+    if (bIsGameOver) return; // 游戏结束无法操作
+
+    UE_LOG(LogTemp, Log, TEXT("Player %d ending turn %d"), CurrentPlayerIndex, CurrentTurn);
+
+    // 1. 结算当前玩家的结束阶段 (城市产出、科研等)
+    ProcessTurnEndForPlayer(CurrentPlayerIndex);
+
+    CheckVictoryConditions(); // 检测科技胜利等
+
+    // 2. 切换到下一个玩家
+    CurrentPlayerIndex++;
+
+    // 如果超过总玩家数，重置为第一个玩家，并增加回合数
+    if (CurrentPlayerIndex >= TotalPlayers)
+    {
+        CurrentPlayerIndex = 0;
+        CurrentTurn++;
+        UE_LOG(LogTemp, Log, TEXT("--- New Turn: %d ---"), CurrentTurn);
+    }
+
+    // 3. 开始新玩家的行动阶段
+    StartTurn();
+}
+
+void ACivi_GameModeBase::StartTurn()
+{
+    UE_LOG(LogTemp, Log, TEXT("Start turn for Player %d"), CurrentPlayerIndex);
+
+    // 1. 处理单位重置 (恢复移动力)
+    ProcessTurnStartForPlayer(CurrentPlayerIndex);
+
+    // 2. 更新战争迷雾 (只显示当前玩家的视野)
+    UpdateFogOfWar();
+
+    // 3. (可选) 通知 UI 更新
+    // OnTurnChanged.Broadcast(CurrentPlayerIndex, CurrentTurn); 
+}
+
+void ACivi_GameModeBase::ProcessTurnStartForPlayer(int32 PlayerIndex)
+{
+    // 遍历所有单位，重置属于该玩家的单位状态
+    for (TActorIterator<AUnit> It(GetWorld()); It; ++It)
+    {
+        AUnit* Unit = *It;
+        if (Unit && Unit->PlayerOwnerIndex == PlayerIndex)
+        {
+            Unit->OnTurnStart(); // 调用 Unit 类的回合开始函数 (重置移动力、驻守回血)
+        }
+    }
+}
+
+void ACivi_GameModeBase::ProcessTurnEndForPlayer(int32 PlayerIndex)
+{
+    FYields TotalTurnIncome;
+
+    // 遍历该玩家的所有城市进行结算
+    for (TActorIterator<ACity> It(GetWorld()); It; ++It)
+    {
+        ACity* City = *It;
+        if (City && City->PlayerOwnerIndex == PlayerIndex)
+        {
+            // 调用 City 的回合处理，传入全局数据资产以计算具体数值
+            City->ProcessTurn(GlobalTerrainData, GlobalBuildingData);
+
+            // 获取该城市本回合产生的盈余 (金币/科技/文化)
+            // 注意：CalculateTurnYields 已经在 ProcessTurn 内部被调用过一次用于计算粮食/生产力，
+            // 这里我们再次调用以获取“上缴”给国家的资源。
+            FYields CityYield = City->CalculateTurnYields(GlobalTerrainData, GlobalBuildingData);
+
+            // 累加全局资源 (金币、科技、文化)
+            TotalTurnIncome.Gold += CityYield.Gold;
+            TotalTurnIncome.Science += CityYield.Science;
+            TotalTurnIncome.Culture += CityYield.Culture;
+        }
+    }
+
+    // 更新玩家库存
+    if (PlayerGlobalYields.IsValidIndex(PlayerIndex))
+    {
+        PlayerGlobalYields[PlayerIndex] = PlayerGlobalYields[PlayerIndex] + TotalTurnIncome;
+
+        UE_LOG(LogTemp, Log, TEXT("Player %d Turn End. Income: Gold+%d, Sci+%d. Total Gold: %d"),
+            PlayerIndex, TotalTurnIncome.Gold, TotalTurnIncome.Science, PlayerGlobalYields[PlayerIndex].Gold);
+    }
+
+    for (TActorIterator<ACity> It(GetWorld()); It; ++It)
+    {
+        ACity* City = *It;
+        if (City && City->PlayerOwnerIndex == PlayerIndex)
+        {
+            City->ProcessTurn(GlobalTerrainData, GlobalBuildingData);
+            FYields CityYield = City->CalculateTurnYields(GlobalTerrainData, GlobalBuildingData);
+
+            TotalTurnIncome.Gold += CityYield.Gold;
+            TotalTurnIncome.Science += CityYield.Science;
+            TotalTurnIncome.Culture += CityYield.Culture;
+        }
+    }
+
+    // 更新库存
+    if (PlayerGlobalYields.IsValidIndex(PlayerIndex))
+    {
+        PlayerGlobalYields[PlayerIndex] = PlayerGlobalYields[PlayerIndex] + TotalTurnIncome;
+    }
+
+    // 处理研发进度
+    ProcessResearchProgress(PlayerIndex, TotalTurnIncome.Science, TotalTurnIncome.Culture);
+
+    UE_LOG(LogTemp, Log, TEXT("Player %d Turn End. Sci+%d, Cult+%d"), PlayerIndex, TotalTurnIncome.Science, TotalTurnIncome.Culture);
+}
+
+FYields ACivi_GameModeBase::GetPlayerResources(int32 PlayerIndex) const
+{
+    if (PlayerGlobalYields.IsValidIndex(PlayerIndex))
+    {
+        return PlayerGlobalYields[PlayerIndex];
+    }
+    return FYields();
+}
+
+void ACivi_GameModeBase::AddPlayerResources(int32 PlayerIndex, const FYields& YieldsToAdd)
+{
+    if (PlayerGlobalYields.IsValidIndex(PlayerIndex))
+    {
+        PlayerGlobalYields[PlayerIndex] = PlayerGlobalYields[PlayerIndex] + YieldsToAdd;
+    }
+}
+
+void ACivi_GameModeBase::UpdateFogOfWar()
+{
+    // 找到地图渲染器并更新视野
+    // 这里假设场景里只有一个渲染器
+    for (TActorIterator<AHexMapRenderer> It(GetWorld()); It; ++It)
+    {
+        AHexMapRenderer* Renderer = *It;
+        if (Renderer)
+        {
+            // 调用之前任务中实现的迷雾更新函数
+            Renderer->UpdateFogOfWarVisuals(MapGrid, CurrentPlayerIndex);
+            return;
+        }
+    }
 }
 
 void ACivi_GameModeBase::InitMap()
@@ -454,3 +633,216 @@ ULandblock* ACivi_GameModeBase::GetLandblock(int32 X, int32 Y) const
     return nullptr;
 }
 
+void ACivi_GameModeBase::InitResearch()
+{
+    PlayerTechStates.SetNum(TotalPlayers);
+    PlayerCivicStates.SetNum(TotalPlayers);
+
+    for (int32 i = 0; i < TotalPlayers; i++)
+    {
+        // 默认解锁 "农业"
+        PlayerTechStates[i].UnlockedTechs.Add(ETechType::Agriculture);
+        // 默认研究 "制陶术" (示例)
+        PlayerTechStates[i].CurrentResearch = ETechType::Pottery;
+
+        // 默认解锁 "法典"
+        PlayerCivicStates[i].UnlockedCivics.Add(ECivicType::CodeOfLaws);
+        PlayerCivicStates[i].CurrentCivic = ECivicType::Craftsmanship;
+    }
+}
+
+void ACivi_GameModeBase::ProcessResearchProgress(int32 PlayerIndex, int32 ScienceYield, int32 CultureYield)
+{
+    if (!PlayerTechStates.IsValidIndex(PlayerIndex) || !GlobalTechData) return;
+
+    // --- 处理科技 ---
+    FPlayerResearchState& TechState = PlayerTechStates[PlayerIndex];
+    if (TechState.CurrentResearch != ETechType::None)
+    {
+        TechState.CurrentScienceProgress += ScienceYield;
+
+        FTechInfo TechInfo = GlobalTechData->GetTechInfo(TechState.CurrentResearch);
+        if (TechState.CurrentScienceProgress >= TechInfo.ScienceCost)
+        {
+            // 研发完成！
+            TechState.UnlockedTechs.Add(TechState.CurrentResearch);
+            UE_LOG(LogTemp, Warning, TEXT("Player %d researched Tech: %s"), PlayerIndex, *TechInfo.DisplayName.ToString());
+
+            // 重置
+            TechState.CurrentResearch = ETechType::None;
+            TechState.CurrentScienceProgress = 0;
+            // 实际 Civ6 会保留溢出值，这里简化处理
+        }
+    }
+
+    // --- 处理市政 ---
+    if (!PlayerCivicStates.IsValidIndex(PlayerIndex) || !GlobalCivicData) return;
+
+    FPlayerCivicState& CivicState = PlayerCivicStates[PlayerIndex];
+    if (CivicState.CurrentCivic != ECivicType::None)
+    {
+        CivicState.CurrentCultureProgress += CultureYield;
+
+        FCivicInfo CivicInfo = GlobalCivicData->GetCivicInfo(CivicState.CurrentCivic);
+        if (CivicState.CurrentCultureProgress >= CivicInfo.CultureCost)
+        {
+            // 研发完成！
+            CivicState.UnlockedCivics.Add(CivicState.CurrentCivic);
+            UE_LOG(LogTemp, Warning, TEXT("Player %d researched Civic: %s"), PlayerIndex, *CivicInfo.DisplayName.ToString());
+
+            CivicState.CurrentCivic = ECivicType::None;
+            CivicState.CurrentCultureProgress = 0;
+        }
+    }
+}
+
+void ACivi_GameModeBase::SetPlayerResearch(int32 PlayerIndex, ETechType Tech)
+{
+    if (PlayerTechStates.IsValidIndex(PlayerIndex))
+    {
+        // 实际逻辑应该检查前置科技是否已解锁
+        PlayerTechStates[PlayerIndex].CurrentResearch = Tech;
+        UE_LOG(LogTemp, Log, TEXT("Player %d started researching Tech %d"), PlayerIndex, (int32)Tech);
+    }
+}
+
+void ACivi_GameModeBase::SetPlayerCivic(int32 PlayerIndex, ECivicType Civic)
+{
+    if (PlayerCivicStates.IsValidIndex(PlayerIndex))
+    {
+        PlayerCivicStates[PlayerIndex].CurrentCivic = Civic;
+    }
+}
+
+bool ACivi_GameModeBase::IsTechUnlocked(int32 PlayerIndex, ETechType Tech) const
+{
+    if (PlayerTechStates.IsValidIndex(PlayerIndex))
+    {
+        return PlayerTechStates[PlayerIndex].UnlockedTechs.Contains(Tech);
+    }
+    return false;
+}
+
+ULandblock* ACivi_GameModeBase::GetLandblockFromWorldPos(FVector WorldPos)
+{
+    // 简单的数学反算 (假设 HexRadius = 100, HexGap = 2, 与 MapRenderer 一致)
+    float R = 100.0f;
+    float W = R * 2.0f + 2.0f;
+    float H = R * FMath::Sqrt(3.0f) + 2.0f;
+
+    // 估算 GridY
+    float ApproxY = WorldPos.Y / H;
+    int32 Y = FMath::RoundToInt(ApproxY);
+
+    // 根据行奇偶性修正 X 偏移
+    float XOffset = 0.0f;
+    if (Y % 2 == 1) XOffset = W * 0.5f; // 奇数行偏移半个宽
+
+    float ApproxX = (WorldPos.X - (XOffset * 0.75f)) / (W * 0.75f); // 0.75 是因为六边形水平重叠
+    int32 X = FMath::RoundToInt(WorldPos.X / (W * 0.75f));
+
+    // 注意：上面的反算是近似值，精准的六边形拾取需要更复杂的数学 (Axial Coordinates)
+    // 对于原型，我们可以遍历鼠标周围几个格子找最近的，或者使用简单的距离检测
+
+    ULandblock* BestBlock = nullptr;
+    float MinDistSq = FLT_MAX;
+
+    // 搜索鼠标点击位置附近的格子 (暴力搜索整个地图太慢，这里简单处理搜全图或局部)
+    // 优化：只搜索计算出的 X,Y 附近的 3x3 范围
+    // 为演示代码简洁，这里直接用简易逻辑：
+
+    // 我们假设 RenderMap 时存了位置，这里反向查找比较麻烦。
+    // 更简单的方法：直接遍历所有 Landblock，找距离 WorldPos 最近且距离 < R 的那个
+
+    for (ULandblock* Block : MapGrid)
+    {
+        if (!Block) continue;
+
+        // 重新计算该 Block 的中心位置 (代码复用 HexMapRenderer 的公式)
+        float WorldX = Block->X * W * 0.75f;
+        float WorldY = Block->Y * H;
+        if (Block->X % 2 == 1) WorldY += H * 0.5f;
+
+        float DistSq = FVector::DistSquared2D(WorldPos, FVector(WorldX, WorldY, 0));
+        if (DistSq < (R * R) && DistSq < MinDistSq)
+        {
+            MinDistSq = DistSq;
+            BestBlock = Block;
+        }
+    }
+
+    return BestBlock;
+}
+
+void ACivi_GameModeBase::CheckVictoryConditions()
+{
+    if (bIsGameOver) return;
+
+    // --- 1. 检测征服胜利 (Conquest Victory) ---
+    // 规则：如果一个玩家控制了地图上所有的城市，则获胜。
+    // (简化版规则，实际 Civ6 是占领所有原始首都)
+
+    TMap<int32, int32> CityCounts; // PlayerIndex -> CityCount
+    int32 TotalCities = 0;
+
+    for (TActorIterator<ACity> It(GetWorld()); It; ++It)
+    {
+        ACity* City = *It;
+        if (City)
+        {
+            CityCounts.FindOrAdd(City->PlayerOwnerIndex)++;
+            TotalCities++;
+        }
+    }
+
+    // 如果只有一个玩家拥有城市，且城市总数 > 0
+    if (TotalCities > 0)
+    {
+        for (auto& Elem : CityCounts)
+        {
+            if (Elem.Value == TotalCities)
+            {
+                // 该玩家拥有所有城市
+                DeclareVictory(Elem.Key, EVictoryType::Conquest);
+                return;
+            }
+        }
+    }
+
+    // 如果没有城市（极少数情况），或者没有任何人拥有所有城市，继续检测...
+
+    // --- 2. 检测科技胜利 (Science Victory) ---
+    // 检查是否有玩家解锁了所有科技 (简单判定)
+    if (GlobalTechData)
+    {
+        int32 TotalTechs = GlobalTechData->Techs.Num();
+        for (int32 i = 0; i < TotalPlayers; ++i)
+        {
+            if (PlayerTechStates.IsValidIndex(i))
+            {
+                if (PlayerTechStates[i].UnlockedTechs.Num() >= TotalTechs && TotalTechs > 0)
+                {
+                    DeclareVictory(i, EVictoryType::Science);
+                    return;
+                }
+            }
+        }
+    }
+}
+
+void ACivi_GameModeBase::DeclareVictory(int32 WinnerIndex, EVictoryType Type)
+{
+    if (bIsGameOver) return;
+
+    bIsGameOver = true;
+    WinnerPlayerIndex = WinnerIndex;
+    VictoryType = Type;
+
+    UE_LOG(LogTemp, Warning, TEXT("GAME OVER! Winner: Player %d, Type: %d"), WinnerIndex, (int32)Type);
+
+    // 通知 UI
+    OnGameOver(WinnerIndex, Type);
+
+    // 可以在这里暂停游戏，或者禁止后续操作
+    // UGameplayStatics::SetGamePaused(this, true);
+}

@@ -37,6 +37,10 @@ struct FTerrainDisplayData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
     int32 MovementCost = 1;
 
+    // 地形基础产出
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain")
+    FYields BaseYields;
+
     FTerrainDisplayData()
         : TerrainType(ETerrain::Plain)
         , DisplayName(FText::FromString(TEXT("平原")))
@@ -85,6 +89,10 @@ struct FLandformDisplayData
     // 额外移动消耗
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landform")
     int32 ExtraMovementCost = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Landform")
+    FYields ExtraYields;
+
 
     FLandformDisplayData()
         : LandformType(ELandform::None)
